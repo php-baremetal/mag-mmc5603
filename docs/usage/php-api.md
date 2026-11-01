@@ -26,7 +26,7 @@ The bus the chip is wired to.
 7-bit address. The MMC5603NJ has a fixed address, so the default is the one to use.
 <!-- @endparam -->
 <!-- @param name="$hz" type="int" default="400000" -->
-SCL clock for this device. A value of 0 or less uses 400 kHz.
+SCL clock for this device: 0 uses 400 kHz, otherwise 1 to 1000000 Hz (a negative value throws `\ValueError` from 1.0.2; earlier versions used 400 kHz).
 <!-- @endparam -->
 <!-- @endparams -->
 
@@ -36,7 +36,7 @@ pulse, sets the output rate to 100 Hz and starts continuous mode (another 20 ms)
 | Message | Cause |
 | --- | --- |
 | `cannot init mmc5603 at 0x..: ESP_ERR_NOT_FOUND` | Something answered, but its product id is not `0x10`. |
-| `cannot init mmc5603 at 0x..: ...` | The id read failed, for example `ESP_ERR_TIMEOUT` with no chip. |
+| `cannot init mmc5603 at 0x..: ...` | The id read or one of the configuration writes failed, for example `ESP_ERR_TIMEOUT` with no chip. |
 | `address 0x.. on this bus is already used by another driver` | A raw device or another driver holds the address. |
 
 Constructing it again with the same bus and address returns a handle to the same device without resetting it.
@@ -56,8 +56,12 @@ chip like `mag()` and throws the same message.
 <!-- @method name="Mmc5603::temp(): float" returns="float" visibility="public" -->
 
 Triggers a temperature measurement, waits for it (checking every 2 ms, at most about 100 ms), and returns
-`raw * 0.8 - 75` °C. If the measurement does not finish in time the last register value is still returned.
-Throws `MMC5603 temp read failed` only when the final register read fails.
+`raw * 0.8 - 75` °C. Throws `MMC5603 temp trigger failed` when the trigger write fails,
+`MMC5603 temp measurement did not complete within 100 ms` when the chip never reports the measurement done
+(versions before 1.0.2 returned the old register value), and `MMC5603 temp read failed` when the final read fails.
+The chip measures temperature only outside continuous mode, so `temp()` stops continuous mode for the measurement
+(up to 100 ms, during which a background sampler reads the last field values) and turns it back on; if that
+fails it throws `MMC5603 continuous mode could not be restored`.
 
 ## Background samples
 

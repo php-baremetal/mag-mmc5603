@@ -34,6 +34,9 @@
 
 extern const i2c_driver_desc_t mmc5603_driver_desc;
 
+/* Stop at the first failed register write: a half-configured chip must not pass as initialised. */
+#define MMC_WRITE(d, reg, val) do { bm_err_t we = i2c_dev_write_reg1((d), (reg), (val)); if (we != BM_OK) return we; } while (0)
+
 static bm_err_t mmc5603_init(i2c_dev_t *d)
 {
     uint8_t id = 0;
@@ -44,13 +47,13 @@ static bm_err_t mmc5603_init(i2c_dev_t *d)
     if (id != MMC_PID_VAL) {
         return BM_ERR_NOT_FOUND;
     }
-    i2c_dev_write_reg1(d, MMC_CTRL1, 0x80);   /* software reset */
+    MMC_WRITE(d, MMC_CTRL1, 0x80);   /* software reset */
     bm_delay_ms(20);
-    i2c_dev_write_reg1(d, MMC_CTRL0, 0x08);   /* SET */
-    i2c_dev_write_reg1(d, MMC_CTRL0, 0x10);   /* RESET (degauss) */
-    i2c_dev_write_reg1(d, MMC_ODR, MMC_ODR_HZ);
-    i2c_dev_write_reg1(d, MMC_CTRL0, 0x80);   /* cmm_freq_en */
-    i2c_dev_write_reg1(d, MMC_CTRL2, 0x10);   /* cmm_en: continuous */
+    MMC_WRITE(d, MMC_CTRL0, 0x08);   /* SET */
+    MMC_WRITE(d, MMC_CTRL0, 0x10);   /* RESET (degauss) */
+    MMC_WRITE(d, MMC_ODR, MMC_ODR_HZ);
+    MMC_WRITE(d, MMC_CTRL0, 0x80);   /* cmm_freq_en */
+    MMC_WRITE(d, MMC_CTRL2, 0x10);   /* cmm_en: continuous */
     bm_delay_ms(20);
     return BM_OK;
 }
@@ -139,17 +142,33 @@ PHP_METHOD(Mmc5603, temp)
     if (!d) {
         RETURN_THROWS();
     }
-    i2c_dev_write_reg1(d, MMC_CTRL0, 0x02);   /* trigger temperature measurement */
-    uint8_t st = 0;
-    for (int i = 0; i < 50; i++) {            /* wait for Meas_T_Done (bit 7), bounded */
-        bm_delay_ms(2);
-        if (i2c_dev_read_reg(d, MMC_STATUS, &st, 1) == BM_OK && (st & 0x80)) {
-            break;
+    /* No temperature measurement in continuous mode: leave it for the measurement, then restore it
+     * (as init sets it) whatever happens, so the magnetometer keeps sampling. */
+    const char *fail = NULL;
+    uint8_t t = 0;
+    if (i2c_dev_write_reg1(d, MMC_CTRL2, 0x00) != BM_OK
+        || i2c_dev_write_reg1(d, MMC_CTRL0, 0x02) != BM_OK) {   /* trigger temperature measurement */
+        fail = "MMC5603 temp trigger failed";
+    } else {
+        uint8_t st = 0;
+        bool done = false;
+        for (int i = 0; i < 50 && !done; i++) {   /* wait for Meas_T_Done (bit 7), bounded */
+            bm_delay_ms(2);
+            done = i2c_dev_read_reg(d, MMC_STATUS, &st, 1) == BM_OK && (st & 0x80);
+        }
+        if (!done) {
+            fail = "MMC5603 temp measurement did not complete within 100 ms";
+        } else if (i2c_dev_read_reg(d, MMC_TEMP, &t, 1) != BM_OK) {
+            fail = "MMC5603 temp read failed";
         }
     }
-    uint8_t t = 0;
-    if (i2c_dev_read_reg(d, MMC_TEMP, &t, 1) != BM_OK) {
-        zend_throw_exception(zend_ce_exception, "MMC5603 temp read failed", 0);
+    bool restored = i2c_dev_write_reg1(d, MMC_CTRL0, 0x80) == BM_OK      /* cmm_freq_en */
+                    && i2c_dev_write_reg1(d, MMC_CTRL2, 0x10) == BM_OK;  /* cmm_en: continuous */
+    if (!fail && !restored) {
+        fail = "MMC5603 continuous mode could not be restored";
+    }
+    if (fail) {
+        zend_throw_exception(zend_ce_exception, fail, 0);
         RETURN_THROWS();
     }
     RETURN_DOUBLE((double) t * 0.8 - 75.0);
