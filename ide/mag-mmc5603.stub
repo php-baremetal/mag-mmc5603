@@ -1,0 +1,73 @@
+<?php
+// php-baremetal/mag-mmc5603 1.1.0 — IDE helper, not loaded at runtime.
+
+namespace Baremetal\I2c\Driver {
+    /**
+     * An MMC5603 3-axis magnetometer: extends Baremetal\I2c\Device and implements Baremetal\Sensor\Magnetometer.
+     *
+     * All the Device methods work on it too. The driver declares a sampler, so poll(), sample() and drain() work
+     * on this class: each sample is the 9 output registers (each axis 20 bits), at most 200 Hz; the chip updates
+     * its output at 100 Hz, so a faster poll() stores repeated values. Convert a sample with decode().
+     */
+    class Mmc5603 extends \Baremetal\I2c\Device implements \Baremetal\Sensor\Magnetometer
+    {
+        /**
+         * Attaches the chip, checks the product id, resets it (20 ms), runs a SET then a RESET pulse, sets the
+         * output rate to 100 Hz and starts continuous mode (another 20 ms).
+         *
+         * Constructing it again with the same bus and address returns a handle to the same device without
+         * resetting it.
+         *
+         * @param \Baremetal\I2c\Bus $bus The bus the chip is wired to.
+         * @param int $address 7-bit address; the chip has a fixed address, so the default is the one to use.
+         * @param int $hz SCL clock for this device in Hz: 0 uses 400 kHz, otherwise 1 to 1000000.
+         * @throws \ValueError When $hz is negative or above 1000000, or $address is outside 0x08 to 0x77.
+         * @throws \Exception "cannot init mmc5603 at 0x..: ..." (the product id is not 0x10, or the id read or a
+         *                    configuration write failed, for example with no chip), or "address 0x.. on this bus
+         *                    is already used by another driver".
+         */
+        public function __construct(\Baremetal\I2c\Bus $bus, int $address = 0x30, int $hz = 400000) {}
+
+        /**
+         * Reads the magnetic field on three axes: one 9-byte read of the latest continuous-mode result.
+         *
+         * Each axis is a 20-bit value, offset by the mid-scale 524288 and scaled by 0.00625 uT per count.
+         *
+         * @return array The list [x, y, z] of floats, in microtesla.
+         * @throws \Exception "MMC5603 mag read failed".
+         */
+        public function mag(): array {}
+
+        /**
+         * Computes the compass heading, atan2(y, x), from a fresh reading.
+         *
+         * Assumes the board is flat (z up); not calibrated. Reads the chip like mag().
+         *
+         * @return float The heading in degrees, 0 to 360.
+         * @throws \Exception "MMC5603 mag read failed".
+         */
+        public function heading(): float {}
+
+        /**
+         * Triggers a temperature measurement, waits for it (every 2 ms, at most about 100 ms) and returns it.
+         *
+         * The chip measures temperature only outside continuous mode, so this stops continuous mode for the
+         * measurement (a background sampler reads the last field values meanwhile) and turns it back on.
+         *
+         * @return float The temperature in degrees Celsius (raw * 0.8 - 75).
+         * @throws \Exception "MMC5603 temp trigger failed", "MMC5603 temp measurement did not complete within 100
+         *                    ms", "MMC5603 temp read failed", or "MMC5603 continuous mode could not be restored".
+         */
+        public function temp(): float {}
+
+        /**
+         * Converts one raw sample from sample() or drain() into readings, scaled like mag() and heading().
+         *
+         * @param string $raw One 9-byte sample: x, y, z bits 19 to 4 (two bytes each), then bits 3 to 0 of x, y, z
+         *                    in the high nibbles of the last three bytes.
+         * @return array ['mag' => [x, y, z] in microtesla, 'heading' => degrees, 0 to 360].
+         * @throws \ValueError "...: Argument #1 ($raw) an MMC5603 sample is 9 bytes" for a shorter string.
+         */
+        public function decode(string $raw): array {}
+    }
+}

@@ -17,7 +17,8 @@
         "baremetal": {
             "register": {
                 "i2c_drivers": ["mmc5603_driver_desc"]
-            }
+            },
+            "ide-stubs": ["ide/mag-mmc5603.stub"]
         }
     }
 }
